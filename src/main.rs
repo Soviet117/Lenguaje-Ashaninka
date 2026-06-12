@@ -7,6 +7,16 @@ enum Token {
     AsankiKeyword,
     ToyKeyword,
     KametsaKeyword,
+    PaiKeyword,
+    PaiTeKeyword,
+    KamKeyword,
+    KaraKeyword,
+    TasKeyword,
+    PawKeyword,
+    IroqKeyword,
+    IrokKeyword,
+    PawaKeyword,
+    ToyaKeyword,
     
     // Valores
     Asanki(String),
@@ -16,6 +26,8 @@ enum Token {
     // Otros
     Variable(String),
     Equal,
+    Semicolon,
+    Comma,
 }
 
 struct Lexer {
@@ -38,8 +50,21 @@ impl Lexer {
             return None;
         }
 
+        let c = self.texto[self.pos];
+        match c {
+            '=' => { self.pos += 1; return Some(Token::Equal); }
+            ';' => { self.pos += 1; return Some(Token::Semicolon); }
+            ',' => { self.pos += 1; return Some(Token::Comma); }
+            _ => {}
+        }
+
         let inicio = self.pos;
         self.avanzar_mientras_sea_valido();
+
+        if inicio == self.pos {
+            self.pos += 1; // saltar carácter no reconocido
+            return self.obtener_token();
+        }
 
         let palabra = self.obtener_palabra(inicio);
 
@@ -64,7 +89,7 @@ impl Lexer {
     }
 
     fn es_caracter_valido(&self, c: char) -> bool {
-        c.is_alphanumeric() || c == '=' || c == '\'' || c == '.'
+        c.is_alphanumeric() || c == '_' || c == '\'' || c == '.'
     }
 
     fn obtener_palabra(&self, inicio: usize) -> String {
@@ -81,7 +106,16 @@ impl Lexer {
             "toy" => return Some(Token::ToyKeyword),
             "kametsa" => return Some(Token::KametsaKeyword),
             "asanki" => return Some(Token::AsankiKeyword),
-            "=" => return Some(Token::Equal),
+            "pai" => return Some(Token::PaiKeyword),
+            "pai_te" => return Some(Token::PaiTeKeyword),
+            "kam" => return Some(Token::KamKeyword),
+            "kara" => return Some(Token::KaraKeyword),
+            "tas" => return Some(Token::TasKeyword),
+            "paw" => return Some(Token::PawKeyword),
+            "iroq" => return Some(Token::IroqKeyword),
+            "irok" => return Some(Token::IrokKeyword),
+            "pawa" => return Some(Token::PawaKeyword),
+            "toya" => return Some(Token::ToyaKeyword),
             _ => {}
         }
 
@@ -107,7 +141,7 @@ fn main() {
     let codigo = if args.len() > 1 {
         fs::read_to_string(&args[1]).expect("No se pudo leer el archivo")
     } else {
-        "asanki stri = 'Soviet'\ntoy ent = 4\nkametsa flo = 1.2".to_string()
+        "asanki stri = 'Soviet';\ntoy ent = 4;\nkametsa flo = 1.2;\npai_te toya a, b;".to_string()
     };
 
     println!("Código:\n{}", codigo);
@@ -123,11 +157,23 @@ fn main() {
             Token::ToyKeyword => println!("  {}. Palabra reservada: toy", contador),
             Token::KametsaKeyword => println!("  {}. Palabra reservada: kametsa", contador),
             Token::AsankiKeyword => println!("  {}. Palabra reservada: asanki", contador),
+            Token::PaiKeyword => println!("  {}. Palabra reservada: pai (Si)", contador),
+            Token::PaiTeKeyword => println!("  {}. Palabra reservada: pai_te (Si no)", contador),
+            Token::KamKeyword => println!("  {}. Palabra reservada: kam (Mientras)", contador),
+            Token::KaraKeyword => println!("  {}. Palabra reservada: kara (Para)", contador),
+            Token::TasKeyword => println!("  {}. Palabra reservada: tas (Función)", contador),
+            Token::PawKeyword => println!("  {}. Palabra reservada: paw (Retornar)", contador),
+            Token::IroqKeyword => println!("  {}. Palabra reservada: iroq (Verdadero)", contador),
+            Token::IrokKeyword => println!("  {}. Palabra reservada: irok (Falso)", contador),
+            Token::PawaKeyword => println!("  {}. Palabra reservada: pawa (Imprimir)", contador),
+            Token::ToyaKeyword => println!("  {}. Palabra reservada: toya (Variable)", contador),
             Token::Variable(nombre) => println!("  {}. Variable: {}", contador, nombre),
             Token::Asanki(valor) => println!("  {}. Valor de tipo Asanki: {}", contador, valor),
             Token::Kametsa(valor) => println!("  {}. Valor de tipo Kametsa: {}", contador, valor),
             Token::Toy(valor) => println!("  {}. Valor de tipo Toy: {}", contador, valor),
-            Token::Equal => println!("  {}. '='", contador),
+            Token::Equal => println!("  {}. Símbolo: '='", contador),
+            Token::Semicolon => println!("  {}. Símbolo: ';'", contador),
+            Token::Comma => println!("  {}. Símbolo: ','", contador),
         }
         contador += 1;
     }
