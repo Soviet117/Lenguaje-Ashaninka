@@ -28,6 +28,10 @@ enum Token {
     Equal,
     Semicolon,
     Comma,
+    LBrace,
+    RBrace,
+    LParen,
+    RParen,
 }
 
 struct Lexer {
@@ -55,6 +59,10 @@ impl Lexer {
             '=' => { self.pos += 1; return Some(Token::Equal); }
             ';' => { self.pos += 1; return Some(Token::Semicolon); }
             ',' => { self.pos += 1; return Some(Token::Comma); }
+            '{' => { self.pos += 1; return Some(Token::LBrace); }
+            '}' => { self.pos += 1; return Some(Token::RBrace); }
+            '(' => { self.pos += 1; return Some(Token::LParen); }
+            ')' => { self.pos += 1; return Some(Token::RParen); }
             _ => {}
         }
 
@@ -141,7 +149,7 @@ fn main() {
     let codigo = if args.len() > 1 {
         fs::read_to_string(&args[1]).expect("No se pudo leer el archivo")
     } else {
-        "asanki stri = 'Soviet';\ntoy ent = 4;\nkametsa flo = 1.2;\npai_te toya a, b;".to_string()
+        "asanki stri = 'Soviet';\ntoy ent = 4;\nkametsa flo = 1.2;\npai_te toya a, b;\ntas suma {\n    toy x = 2;\n    pawa(x);\n}".to_string()
     };
 
     println!("Código:\n{}", codigo);
@@ -174,6 +182,10 @@ fn main() {
             Token::Equal => println!("  {}. Símbolo: '='", contador),
             Token::Semicolon => println!("  {}. Símbolo: ';'", contador),
             Token::Comma => println!("  {}. Símbolo: ','", contador),
+            Token::LBrace => println!("  {}. Símbolo: '{{'", contador),
+            Token::RBrace => println!("  {}. Símbolo: '}}'", contador),
+            Token::LParen => println!("  {}. Símbolo: '('", contador),
+            Token::RParen => println!("  {}. Símbolo: ')'", contador),
         }
         contador += 1;
     }
