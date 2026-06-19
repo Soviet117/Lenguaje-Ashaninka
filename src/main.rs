@@ -1,7 +1,8 @@
+#![allow(dead_code)]
 use std::fs;
 use std::env;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 enum Token {
     // Palabras reservadas
     AsankiKeyword,
@@ -79,7 +80,6 @@ impl Lexer {
         self.clasificar_token(palabra)
     }
 
-
     fn saltar_espacios(&mut self) {
         while self.pos < self.texto.len() && self.texto[self.pos].is_whitespace() {
             self.pos += 1;
@@ -103,7 +103,6 @@ impl Lexer {
     fn obtener_palabra(&self, inicio: usize) -> String {
         self.texto[inicio..self.pos].iter().collect()
     }
-
 
     fn clasificar_token(&mut self, palabra: String) -> Option<Token> {
         if self.termina_con_comilla() {
@@ -143,50 +142,207 @@ impl Lexer {
     }
 }
 
+// ==========================================
+// ESTRUCTURAS DEL AST
+// ==========================================
+
+#[derive(Debug)]
+enum Tipo {
+    Asanki,
+    Toy,
+    Kametsa,
+}
+
+#[derive(Debug)]
+enum Expresion {
+    Variable(String),
+    Asanki(String),
+    Toy(u32),
+    Kametsa(f32),
+}
+
+#[derive(Debug)]
+enum Sentencia {
+    // Declaracion: Tipo de dato, nombre de la variable y su valor inicial
+    Declaracion(Tipo, String, Expresion),
+    // Asignacion: Nombre de variable y su nuevo valor
+    Asignacion(String, Expresion),
+    // Funcion: Nombre y la lista de sentencias dentro de sus llaves
+    Funcion(String, Vec<Sentencia>),
+    // Llamada: Imprimir (pawa) una variable
+    Llamada(String),
+}
+
+#[derive(Debug)]
+struct Programa {
+    sentencias: Vec<Sentencia>,
+}
+
+// ==========================================
+// PARSER MINIMO
+// ==========================================
+
+struct Parser {
+    lexer: Lexer,
+    token_actual: Option<Token>,
+}
+
+impl Parser {
+    fn nuevo(mut lexer: Lexer) -> Self {
+        let token_actual = lexer.obtener_token();
+        Parser { lexer, token_actual }
+    }
+
+    // Avanza al siguiente token generado por el lexer
+    fn avanzar(&mut self) {
+        self.token_actual = self.lexer.obtener_token();
+    }
+
+    // Punto de entrada: parsea todo el texto hasta el final
+    fn parsear_programa(&mut self) -> Programa {
+        let mut sentencias = Vec::new();
+        while self.token_actual.is_some() {
+            if let Some(sentencia) = self.parsear_sentencia() {
+                sentencias.push(sentencia);
+            } else {
+                // Si encontramos un token raro, avanzamos para no trabarnos
+                self.avanzar();
+            }
+        }
+        Programa { sentencias }
+    }
+
+    // Evalúa qué tipo de sentencia estamos leyendo
+    fn parsear_sentencia(&mut self) -> Option<Sentencia> {
+        let token = self.token_actual.clone()?;
+
+        match token {
+            // 1. Declaraciones de variables
+            Token::AsankiKeyword | Token::ToyKeyword | Token::KametsaKeyword => {
+                let tipo = match token {
+                    Token::AsankiKeyword => Tipo::Asanki,
+                    Token::ToyKeyword => Tipo::Toy,
+                    Token::KametsaKeyword => Tipo::Kametsa,
+                    _ => unreachable!(),
+                };
+                self.avanzar(); // Saltamos el tipo
+
+                // Leemos el nombre
+                let nombre = if let Some(Token::Variable(n)) = self.token_actual.clone() {
+                    n
+                } else { return None; };
+                self.avanzar(); // Saltamos el nombre
+
+                // Verificamos el igual '='
+                if let Some(Token::Equal) = self.token_actual {
+                    self.avanzar(); // Saltamos el '='
+                    let valor = self.parsear_expresion()?;
+                    
+                    // Saltamos el punto y coma ';' opcionalmente
+                    if let Some(Token::Semicolon) = self.token_actual { self.avanzar(); }
+                    
+                    return Some(Sentencia::Declaracion(tipo, nombre, valor));
+                }
+                None
+            }
+
+            // 4. Asignaciones directas a variables
+            Token::Variable(nombre) => {
+                self.avanzar(); // Saltamos el nombre
+
+                // Verificamos el igual '='
+                if let Some(Token::Equal) = self.token_actual {
+                    self.avanzar(); // Saltamos el '='
+                    let valor = self.parsear_expresion()?;
+                    
+                    if let Some(Token::Semicolon) = self.token_actual { self.avanzar(); }
+                    
+                    return Some(Sentencia::Asignacion(nombre, valor));
+                }
+                None
+            }
+
+            // 2. Funciones
+            Token::TasKeyword => {
+                self.avanzar(); // Saltamos 'tas'
+                
+                // Obtenemos el nombre de la funcion
+                let nombre = if let Some(Token::Variable(n)) = self.token_actual.clone() {
+                    n
+                } else { return None; };
+                self.avanzar(); // Saltamos el nombre
+
+                if let Some(Token::LBrace) = self.token_actual { self.avanzar(); } // Saltamos '{'
+
+                // Parseamos todo lo que está dentro de las llaves
+                let mut cuerpo = Vec::new();
+                while self.token_actual.is_some() && self.token_actual != Some(Token::RBrace) {
+                    if let Some(sentencia) = self.parsear_sentencia() {
+                        cuerpo.push(sentencia);
+                    } else {
+                        self.avanzar();
+                    }
+                }
+
+                if let Some(Token::RBrace) = self.token_actual { self.avanzar(); } // Saltamos '}'
+                
+                Some(Sentencia::Funcion(nombre, cuerpo))
+            }
+
+            // 3. Llamadas
+            Token::PawaKeyword => {
+                self.avanzar(); // Saltamos 'pawa'
+                
+                if let Some(Token::LParen) = self.token_actual { self.avanzar(); } // Saltamos '('
+                
+                let variable = if let Some(Token::Variable(n)) = self.token_actual.clone() {
+                    n
+                } else { return None; };
+                self.avanzar(); // Saltamos la variable
+
+                if let Some(Token::RParen) = self.token_actual { self.avanzar(); } // Saltamos ')'
+                if let Some(Token::Semicolon) = self.token_actual { self.avanzar(); } // Saltamos ';'
+
+                Some(Sentencia::Llamada(variable))
+            }
+
+            _ => None,
+        }
+    }
+
+    // Evalúa los valores a la derecha del '='
+    fn parsear_expresion(&mut self) -> Option<Expresion> {
+        let token = self.token_actual.clone()?;
+        let expresion = match token {
+            Token::Variable(n) => Expresion::Variable(n),
+            Token::Asanki(s) => Expresion::Asanki(s),
+            Token::Toy(v) => Expresion::Toy(v),
+            Token::Kametsa(v) => Expresion::Kametsa(v),
+            _ => return None,
+        };
+        self.avanzar();
+        Some(expresion)
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     let codigo = if args.len() > 1 {
         fs::read_to_string(&args[1]).expect("No se pudo leer el archivo")
     } else {
-        "asanki stri = 'Soviet';\ntoy ent = 4;\nkametsa flo = 1.2;\npai_te toya a, b;\ntas suma {\n    toy x = 2;\n    pawa(x);\n}".to_string()
+        "asanki stri = 'Soviet';\ntoy ent = 4;\nkametsa flo = 1.2;\ntoy nose = 5;\n\ntas suma {\n    toy x = 2;\n    pawa(x);\n}".to_string()
     };
 
-    println!("Código:\n{}", codigo);
-    println!("\nAnálisis:");
+    println!("Código a analizar:\n{}", codigo);
+    println!("------------------------------------------------");
+    println!("AST GENERADO POR EL PARSER MINIMO:\n");
 
-    let mut lexer = Lexer::nuevo(&codigo);
-    println!("{:?}\n", lexer.texto);
+    let lexer = Lexer::nuevo(&codigo);
+    let mut parser = Parser::nuevo(lexer);
 
-    let mut contador = 1;
-
-    while let Some(token) = lexer.obtener_token() {
-        match token {
-            Token::ToyKeyword => println!("  {}. Palabra reservada: toy", contador),
-            Token::KametsaKeyword => println!("  {}. Palabra reservada: kametsa", contador),
-            Token::AsankiKeyword => println!("  {}. Palabra reservada: asanki", contador),
-            Token::PaiKeyword => println!("  {}. Palabra reservada: pai (Si)", contador),
-            Token::PaiTeKeyword => println!("  {}. Palabra reservada: pai_te (Si no)", contador),
-            Token::KamKeyword => println!("  {}. Palabra reservada: kam (Mientras)", contador),
-            Token::KaraKeyword => println!("  {}. Palabra reservada: kara (Para)", contador),
-            Token::TasKeyword => println!("  {}. Palabra reservada: tas (Función)", contador),
-            Token::PawKeyword => println!("  {}. Palabra reservada: paw (Retornar)", contador),
-            Token::IroqKeyword => println!("  {}. Palabra reservada: iroq (Verdadero)", contador),
-            Token::IrokKeyword => println!("  {}. Palabra reservada: irok (Falso)", contador),
-            Token::PawaKeyword => println!("  {}. Palabra reservada: pawa (Imprimir)", contador),
-            Token::ToyaKeyword => println!("  {}. Palabra reservada: toya (Variable)", contador),
-            Token::Variable(nombre) => println!("  {}. Variable: {}", contador, nombre),
-            Token::Asanki(valor) => println!("  {}. Valor de tipo Asanki: {}", contador, valor),
-            Token::Kametsa(valor) => println!("  {}. Valor de tipo Kametsa: {}", contador, valor),
-            Token::Toy(valor) => println!("  {}. Valor de tipo Toy: {}", contador, valor),
-            Token::Equal => println!("  {}. Símbolo: '='", contador),
-            Token::Semicolon => println!("  {}. Símbolo: ';'", contador),
-            Token::Comma => println!("  {}. Símbolo: ','", contador),
-            Token::LBrace => println!("  {}. Símbolo: '{{'", contador),
-            Token::RBrace => println!("  {}. Símbolo: '}}'", contador),
-            Token::LParen => println!("  {}. Símbolo: '('", contador),
-            Token::RParen => println!("  {}. Símbolo: ')'", contador),
-        }
-        contador += 1;
-    }
+    let ast = parser.parsear_programa();
+    
+    // Imprimir el AST resultante en consola
+    println!("{:#?}", ast);
 }
