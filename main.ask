@@ -3,9 +3,13 @@ toy ent = 4
 kametsa flo = 1.2
 toy nose = 5
 
-toy dos 7 =
+toy dos = 7
 
 tas suma{
     toy x = 2
     pawa(x)
+}
+
+tas resta{
+    pawa()
 }

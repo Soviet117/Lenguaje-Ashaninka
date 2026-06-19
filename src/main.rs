@@ -76,7 +76,6 @@ impl Lexer {
         }
 
         let palabra = self.obtener_palabra(inicio);
-
         self.clasificar_token(palabra)
     }
 
@@ -179,7 +178,7 @@ struct Programa {
 }
 
 // ==========================================
-// PARSER MINIMO
+// PARSER CON VALIDACIÓN
 // ==========================================
 
 struct Parser {
@@ -198,26 +197,32 @@ impl Parser {
         self.token_actual = self.lexer.obtener_token();
     }
 
-    // Punto de entrada: parsea todo el texto hasta el final
-    fn parsear_programa(&mut self) -> Programa {
-        let mut sentencias = Vec::new();
-        while self.token_actual.is_some() {
-            if let Some(sentencia) = self.parsear_sentencia() {
-                sentencias.push(sentencia);
-            } else {
-                // Si encontramos un token raro, avanzamos para no trabarnos
+    fn coincidir(&mut self, token_esperado: Token) -> bool {
+        if let Some(ref t) = self.token_actual {
+            if std::mem::discriminant(t) == std::mem::discriminant(&token_esperado) {
                 self.avanzar();
+                return true;
             }
         }
-        Programa { sentencias }
+        false
     }
 
-    // Evalúa qué tipo de sentencia estamos leyendo
-    fn parsear_sentencia(&mut self) -> Option<Sentencia> {
-        let token = self.token_actual.clone()?;
+    // Parsea todo el texto y retorna Result. Si encuentra un error, se detiene inmediatamente.
+    fn parsear_programa(&mut self) -> Result<Programa, String> {
+        let mut sentencias = Vec::new();
+        while self.token_actual.is_some() {
+            let sentencia = self.parsear_sentencia()?;
+            sentencias.push(sentencia);
+        }
+        Ok(Programa { sentencias })
+    }
+
+    // Valida la sintaxis del lenguaje
+    fn parsear_sentencia(&mut self) -> Result<Sentencia, String> {
+        let token = self.token_actual.clone().ok_or("Fin de archivo inesperado")?;
 
         match token {
-            // 1. Declaraciones de variables
+            // 1. Declaraciones de variables: asanki/toy/kametsa nombre = valor
             Token::AsankiKeyword | Token::ToyKeyword | Token::KametsaKeyword => {
                 let tipo = match token {
                     Token::AsankiKeyword => Tipo::Asanki,
@@ -225,103 +230,132 @@ impl Parser {
                     Token::KametsaKeyword => Tipo::Kametsa,
                     _ => unreachable!(),
                 };
-                self.avanzar(); // Saltamos el tipo
+                self.avanzar(); // Saltamos el tipo de variable
 
-                // Leemos el nombre
-                let nombre = if let Some(Token::Variable(n)) = self.token_actual.clone() {
-                    n
-                } else { return None; };
-                self.avanzar(); // Saltamos el nombre
+                // Esperamos un identificador (Variable)
+                let nombre = match self.token_actual.clone() {
+                    Some(Token::Variable(n)) => {
+                        self.avanzar();
+                        n
+                    }
+                    Some(t) => return Err(format!("Se esperaba el nombre de la variable, pero se encontró: {:?}", t)),
+                    None => return Err("Se esperaba el nombre de la variable, pero se llegó al fin del archivo".to_string()),
+                };
 
-                // Verificamos el igual '='
-                if let Some(Token::Equal) = self.token_actual {
-                    self.avanzar(); // Saltamos el '='
-                    let valor = self.parsear_expresion()?;
-                    
-                    // Saltamos el punto y coma ';' opcionalmente
-                    if let Some(Token::Semicolon) = self.token_actual { self.avanzar(); }
-                    
-                    return Some(Sentencia::Declaracion(tipo, nombre, valor));
+                // Esperamos el signo '='
+                if !self.coincidir(Token::Equal) {
+                    return Err(format!(
+                        "Error en declaración de '{}': se esperaba el símbolo '=' después del nombre, pero se encontró: {:?}",
+                        nombre, self.token_actual
+                    ));
                 }
-                None
+
+                // Esperamos el valor de la variable
+                let valor = self.parsear_expresion()?;
+                
+                // Permitir punto y coma ';' opcional
+                let _ = self.coincidir(Token::Semicolon);
+                
+                Ok(Sentencia::Declaracion(tipo, nombre, valor))
             }
 
-            // 4. Asignaciones directas a variables
+            // 4. Asignaciones directas a variables: nombre = valor
             Token::Variable(nombre) => {
                 self.avanzar(); // Saltamos el nombre
 
-                // Verificamos el igual '='
-                if let Some(Token::Equal) = self.token_actual {
-                    self.avanzar(); // Saltamos el '='
-                    let valor = self.parsear_expresion()?;
-                    
-                    if let Some(Token::Semicolon) = self.token_actual { self.avanzar(); }
-                    
-                    return Some(Sentencia::Asignacion(nombre, valor));
+                // Esperamos el signo '='
+                if !self.coincidir(Token::Equal) {
+                    return Err(format!(
+                        "Error en asignación: se esperaba '=' después de '{}', pero se encontró: {:?}",
+                        nombre, self.token_actual
+                    ));
                 }
-                None
+
+                let valor = self.parsear_expresion()?;
+                
+                let _ = self.coincidir(Token::Semicolon);
+                
+                Ok(Sentencia::Asignacion(nombre, valor))
             }
 
-            // 2. Funciones
+            // 2. Funciones: tas nombre { cuerpo }
             Token::TasKeyword => {
                 self.avanzar(); // Saltamos 'tas'
                 
-                // Obtenemos el nombre de la funcion
-                let nombre = if let Some(Token::Variable(n)) = self.token_actual.clone() {
-                    n
-                } else { return None; };
-                self.avanzar(); // Saltamos el nombre
+                // Esperamos el nombre de la función
+                let nombre = match self.token_actual.clone() {
+                    Some(Token::Variable(n)) => {
+                        self.avanzar();
+                        n
+                    }
+                    Some(t) => return Err(format!("Se esperaba el nombre de la función, pero se encontró: {:?}", t)),
+                    None => return Err("Se esperaba el nombre de la función, pero se llegó al fin del archivo".to_string()),
+                };
 
-                if let Some(Token::LBrace) = self.token_actual { self.avanzar(); } // Saltamos '{'
+                // Esperamos llave abierta '{'
+                if !self.coincidir(Token::LBrace) {
+                    return Err(format!("Se esperaba '{{' al iniciar la función '{}', pero se encontró: {:?}", nombre, self.token_actual));
+                }
 
                 // Parseamos todo lo que está dentro de las llaves
                 let mut cuerpo = Vec::new();
                 while self.token_actual.is_some() && self.token_actual != Some(Token::RBrace) {
-                    if let Some(sentencia) = self.parsear_sentencia() {
-                        cuerpo.push(sentencia);
-                    } else {
-                        self.avanzar();
-                    }
+                    cuerpo.push(self.parsear_sentencia()?);
                 }
 
-                if let Some(Token::RBrace) = self.token_actual { self.avanzar(); } // Saltamos '}'
+                // Esperamos llave cerrada '}'
+                if !self.coincidir(Token::RBrace) {
+                    return Err(format!("Se esperaba '}}' al finalizar la función '{}', pero se llegó al fin del archivo", nombre));
+                }
                 
-                Some(Sentencia::Funcion(nombre, cuerpo))
+                Ok(Sentencia::Funcion(nombre, cuerpo))
             }
 
-            // 3. Llamadas
+            // 3. Llamadas: pawa(variable)
             Token::PawaKeyword => {
                 self.avanzar(); // Saltamos 'pawa'
                 
-                if let Some(Token::LParen) = self.token_actual { self.avanzar(); } // Saltamos '('
+                // Esperamos '('
+                if !self.coincidir(Token::LParen) {
+                    return Err(format!("Se esperaba '(' después de 'pawa', pero se encontró: {:?}", self.token_actual));
+                }
                 
-                let variable = if let Some(Token::Variable(n)) = self.token_actual.clone() {
-                    n
-                } else { return None; };
-                self.avanzar(); // Saltamos la variable
+                // Esperamos la variable
+                let variable = match self.token_actual.clone() {
+                    Some(Token::Variable(v)) => {
+                        self.avanzar();
+                        v
+                    }
+                    Some(t) => return Err(format!("Se esperaba una variable dentro de pawa(), pero se encontró: {:?}", t)),
+                    None => return Err("Se esperaba una variable dentro de pawa(), pero se llegó al fin del archivo".to_string()),
+                };
 
-                if let Some(Token::RParen) = self.token_actual { self.avanzar(); } // Saltamos ')'
-                if let Some(Token::Semicolon) = self.token_actual { self.avanzar(); } // Saltamos ';'
+                // Esperamos ')'
+                if !self.coincidir(Token::RParen) {
+                    return Err(format!("Se esperaba ')' para cerrar la llamada a pawa, pero se encontró: {:?}", self.token_actual));
+                }
 
-                Some(Sentencia::Llamada(variable))
+                let _ = self.coincidir(Token::Semicolon);
+
+                Ok(Sentencia::Llamada(variable))
             }
 
-            _ => None,
+            _ => Err(format!("Token no esperado al inicio de sentencia: {:?}", token)),
         }
     }
 
-    // Evalúa los valores a la derecha del '='
-    fn parsear_expresion(&mut self) -> Option<Expresion> {
-        let token = self.token_actual.clone()?;
+    // Parsea los valores a la derecha de '='
+    fn parsear_expresion(&mut self) -> Result<Expresion, String> {
+        let token = self.token_actual.clone().ok_or("Se esperaba un valor, pero se llegó al fin del archivo")?;
         let expresion = match token {
             Token::Variable(n) => Expresion::Variable(n),
             Token::Asanki(s) => Expresion::Asanki(s),
             Token::Toy(v) => Expresion::Toy(v),
             Token::Kametsa(v) => Expresion::Kametsa(v),
-            _ => return None,
+            _ => return Err(format!("Se esperaba un valor o variable, pero se encontró: {:?}", token)),
         };
         self.avanzar();
-        Some(expresion)
+        Ok(expresion)
     }
 }
 
@@ -331,18 +365,21 @@ fn main() {
     let codigo = if args.len() > 1 {
         fs::read_to_string(&args[1]).expect("No se pudo leer el archivo")
     } else {
-        "asanki stri = 'Soviet';\ntoy ent = 4;\nkametsa flo = 1.2;\ntoy nose = 5;\n\ntas suma {\n    toy x = 2;\n    pawa(x);\n}".to_string()
+        "asanki stri = 'Soviet'\ntoy ent = 4\nkametsa flo = 1.2\ntoy nose = 5\n\ntoy dos 7 =\n\ntas suma{\n    toy x = 2\n    pawa(x)\n}".to_string()
     };
 
     println!("Código a analizar:\n{}", codigo);
     println!("------------------------------------------------");
-    println!("AST GENERADO POR EL PARSER MINIMO:\n");
 
     let lexer = Lexer::nuevo(&codigo);
     let mut parser = Parser::nuevo(lexer);
 
-    let ast = parser.parsear_programa();
-    
-    // Imprimir el AST resultante en consola
-    println!("{:#?}", ast);
+    match parser.parsear_programa() {
+        Ok(ast) => {
+            println!("AST GENERADO CON ÉXITO:\n{:#?}", ast);
+        }
+        Err(e) => {
+            println!("ERROR SINTÁCTICO: {}", e);
+        }
+    }
 }
